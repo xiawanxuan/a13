@@ -20,6 +20,8 @@ type TaskRepository interface {
 	UpdateWithRetry(task *model.Task, version int) (bool, error)
 	ClaimDueTasks(workerID string, limit int) ([]model.Task, error)
 	RecoverTimeoutTasks(timeoutSeconds int) (int64, error)
+	CountByStatus(status model.TaskStatus) (int64, error)
+	CountAll() (int64, error)
 }
 
 type taskRepository struct {
