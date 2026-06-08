@@ -71,38 +71,53 @@ func (s *Scheduler) pollTasks() {
 	ticker := time.NewTicker(s.pollInterval)
 	defer ticker.Stop()
 
+	recoverTicker := time.NewTicker(30 * time.Second)
+	defer recoverTicker.Stop()
+
 	for {
 		select {
 		case <-s.stopChan:
 			return
 		case <-ticker.C:
 			s.fetchAndDispatchTasks()
+		case <-recoverTicker.C:
+			s.recoverTimeoutTasks()
 		}
 	}
 }
 
 func (s *Scheduler) fetchAndDispatchTasks() {
-	tasks, err := s.taskService.GetDueTasks(s.maxFetchSize)
+	tasks, err := s.taskService.ClaimDueTasks(s.workerID, s.maxFetchSize)
 	if err != nil {
-		fmt.Printf("[Scheduler] Failed to get due tasks: %v\n", err)
+		fmt.Printf("[Scheduler] Failed to claim due tasks: %v\n", err)
 		return
 	}
 
+	if len(tasks) == 0 {
+		return
+	}
+
+	fmt.Printf("[Scheduler] Claimed %d tasks\n", len(tasks))
+
 	for i := range tasks {
 		task := &tasks[i]
-		claimed, err := s.taskService.ClaimTask(task.ID, s.workerID)
-		if err != nil {
-			fmt.Printf("[Scheduler] Failed to claim task %d: %v\n", task.ID, err)
-			continue
+		fmt.Printf("[Scheduler] Task %d claimed by worker %s\n", task.ID, s.workerID)
+		select {
+		case s.taskQueue <- task:
+		default:
+			fmt.Printf("[Scheduler] Task queue is full, skipping task %d\n", task.ID)
 		}
-		if claimed {
-			fmt.Printf("[Scheduler] Task %d claimed by worker %s\n", task.ID, s.workerID)
-			select {
-			case s.taskQueue <- task:
-			default:
-				fmt.Printf("[Scheduler] Task queue is full, skipping task %d\n", task.ID)
-			}
-		}
+	}
+}
+
+func (s *Scheduler) recoverTimeoutTasks() {
+	count, err := s.taskService.RecoverTimeoutTasks(600)
+	if err != nil {
+		fmt.Printf("[Scheduler] Failed to recover timeout tasks: %v\n", err)
+		return
+	}
+	if count > 0 {
+		fmt.Printf("[Scheduler] Recovered %d timeout tasks\n", count)
 	}
 }
 

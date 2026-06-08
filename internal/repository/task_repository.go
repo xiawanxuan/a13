@@ -18,6 +18,8 @@ type TaskRepository interface {
 	UpdateStatus(id uint64, status model.TaskStatus, version int) (bool, error)
 	ClaimTask(id uint64, workerID string, version int) (bool, error)
 	UpdateWithRetry(task *model.Task, version int) (bool, error)
+	ClaimDueTasks(workerID string, limit int) ([]model.Task, error)
+	RecoverTimeoutTasks(timeoutSeconds int) (int64, error)
 }
 
 type taskRepository struct {
@@ -134,4 +136,69 @@ func (r *taskRepository) UpdateWithRetry(task *model.Task, version int) (bool, e
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+func (r *taskRepository) ClaimDueTasks(workerID string, limit int) ([]model.Task, error) {
+	var claimedTasks []model.Task
+
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		startTime := now.Add(-1 * time.Second)
+
+		result := tx.Model(&model.Task{}).
+			Where("status IN ? AND next_execute_time <= ?",
+				[]model.TaskStatus{model.TaskStatusPending, model.TaskStatusFailed},
+				now).
+			Order("next_execute_time ASC").
+			Limit(limit).
+			Updates(map[string]interface{}{
+				"status":            model.TaskStatusRunning,
+				"worker_id":         workerID,
+				"last_execute_time": now,
+				"version":           gorm.Expr("version + 1"),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+
+		if result.RowsAffected == 0 {
+			return nil
+		}
+
+		err := tx.Where("worker_id = ? AND status = ? AND last_execute_time >= ?",
+			workerID, model.TaskStatusRunning, startTime).
+			Order("next_execute_time ASC").
+			Find(&claimedTasks).Error
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return claimedTasks, nil
+}
+
+func (r *taskRepository) RecoverTimeoutTasks(timeoutSeconds int) (int64, error) {
+	now := time.Now()
+	timeoutThreshold := now.Add(-time.Duration(timeoutSeconds) * time.Second)
+
+	result := r.db.Model(&model.Task{}).
+		Where("status = ? AND last_execute_time <= ?",
+			model.TaskStatusRunning,
+			timeoutThreshold).
+		Updates(map[string]interface{}{
+			"status":  model.TaskStatusFailed,
+			"version": gorm.Expr("version + 1"),
+		})
+
+	if result.Error != nil {
+		return 0, result.Error
+	}
+
+	return result.RowsAffected, nil
 }

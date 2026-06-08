@@ -2,12 +2,12 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"task-scheduler/internal/dto"
 	"task-scheduler/internal/model"
+	"task-scheduler/internal/pkg/cronutil"
 	"task-scheduler/internal/repository"
 	"time"
-
-	"github.com/robfig/cron/v3"
 )
 
 type TaskService interface {
@@ -21,6 +21,8 @@ type TaskService interface {
 	ResumeTask(id uint64) error
 	GetDueTasks(limit int) ([]model.Task, error)
 	ClaimTask(taskID uint64, workerID string) (bool, error)
+	ClaimDueTasks(workerID string, limit int) ([]model.Task, error)
+	RecoverTimeoutTasks(timeoutSeconds int) (int64, error)
 	CompleteTask(taskID uint64, success bool, result, errorMsg string) error
 	CalculateNextTime(cronExpr string) (*time.Time, error)
 }
@@ -243,6 +245,36 @@ func (s *taskService) ClaimTask(taskID uint64, workerID string) (bool, error) {
 	return success, nil
 }
 
+func (s *taskService) ClaimDueTasks(workerID string, limit int) ([]model.Task, error) {
+	tasks, err := s.taskRepo.ClaimDueTasks(workerID, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range tasks {
+		task := &tasks[i]
+		taskLog := &model.TaskLog{
+			TaskID:     task.ID,
+			TaskName:   task.Name,
+			Status:     model.TaskLogStatusRunning,
+			RetryTimes: task.RetryTimes,
+			WorkerID:   workerID,
+		}
+		now := time.Now()
+		taskLog.StartTime = &now
+		err = s.logRepo.Create(taskLog)
+		if err != nil {
+			fmt.Printf("[TaskService] Failed to create task log for task %d: %v\n", task.ID, err)
+		}
+	}
+
+	return tasks, nil
+}
+
+func (s *taskService) RecoverTimeoutTasks(timeoutSeconds int) (int64, error) {
+	return s.taskRepo.RecoverTimeoutTasks(timeoutSeconds)
+}
+
 func (s *taskService) CompleteTask(taskID uint64, success bool, result, errorMsg string) error {
 	task, err := s.taskRepo.GetByID(taskID)
 	if err != nil {
@@ -326,10 +358,9 @@ func (s *taskService) CompleteTask(taskID uint64, success bool, result, errorMsg
 }
 
 func (s *taskService) CalculateNextTime(cronExpr string) (*time.Time, error) {
-	schedule, err := cron.ParseStandard(cronExpr)
+	next, err := cronutil.NextTime(cronExpr, time.Now())
 	if err != nil {
 		return nil, err
 	}
-	next := schedule.Next(time.Now())
 	return &next, nil
 }
