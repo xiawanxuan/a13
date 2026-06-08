@@ -12,6 +12,17 @@ logs/
 *.bak
 *.swp
 
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+.gomodcache/
+.gopath/
+
 # Build / Dependencies
 node_modules/
 dist/

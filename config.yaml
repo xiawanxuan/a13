@@ -1,0 +1,15 @@
+server:
+  port: 8080
+  mode: debug
+
+database:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: root
+  dbname: task_scheduler
+  charset: utf8mb4
+
+scheduler:
+  worker_count: 5
+  enable: true
