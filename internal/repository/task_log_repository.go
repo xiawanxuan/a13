@@ -11,6 +11,10 @@ type TaskLogRepository interface {
 	GetByID(id uint64) (*model.TaskLog, error)
 	ListByTaskID(taskID uint64, page, pageSize int) ([]model.TaskLog, int64, error)
 	Update(log *model.TaskLog) error
+	CountByStatus(status model.TaskLogStatus) (int64, error)
+	CountAll() (int64, error)
+	CountToday() (int64, error)
+	AvgDuration() (float64, error)
 }
 
 type taskLogRepository struct {

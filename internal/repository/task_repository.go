@@ -204,3 +204,15 @@ func (r *taskRepository) RecoverTimeoutTasks(timeoutSeconds int) (int64, error) 
 
 	return result.RowsAffected, nil
 }
+
+func (r *taskRepository) CountByStatus(status model.TaskStatus) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.Task{}).Where("status = ?", status).Count(&count).Error
+	return count, err
+}
+
+func (r *taskRepository) CountAll() (int64, error) {
+	var count int64
+	err := r.db.Model(&model.Task{}).Count(&count).Error
+	return count, err
+}
